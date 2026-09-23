@@ -3,14 +3,29 @@ package utils;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Utility class that merges user-submitted code with a predefined base,
  * automatically generates test cases, compiles if necessary, and executes the final result.
+ *
+ * <p>Compilation and execution of the submission go through a {@link Sandbox}, which
+ * isolates them from the host (see {@link Sandbox} for the configuration).</p>
  */
 public class FusionneurCode3 {
+
+    private final Sandbox sandbox;
+
+    /** Uses the sandbox configured by the environment (Docker by default). */
+    public FusionneurCode3() {
+        this(Sandbox.fromEnvironment());
+    }
+
+    public FusionneurCode3(Sandbox sandbox) {
+        this.sandbox = sandbox;
+    }
 
     /**
      * Class to hold the result of the code execution, including standard output,
@@ -40,6 +55,8 @@ public class FusionneurCode3 {
      * @param codeBase        Optional base code to inject into (used when not empty)
      * @param ligneInsertion  The line number in base code to insert the user code
      * @return                An execution result with output, error, and exit code
+     * @throws Sandbox.SandboxUnavailableException if the sandbox is required but unavailable;
+     *                                             the submission is then not executed
      */
     public ResultatExecution executerCode(String langage, String codeUtilisateur, String codeBase, int ligneInsertion)
             throws IOException, InterruptedException {
@@ -187,99 +204,68 @@ public class FusionneurCode3 {
         System.out.println("=== CODE FINAL ===");
         System.out.println(codeFinal);
 
-        // Compilation and execution logic
-        String ext;
-        String compileCommand = null;
-        String runCommand;
-        Path tempDir = Files.createTempDirectory("fusion_");
-        File tempFile;
-        File outputExe = null;
+        // Compilation and execution logic: file names and commands are relative to the
+        // submission directory, as seen both by the sandbox container and by the host
+        String fileName;
+        List<String> compileCommand = null;
+        List<String> runCommand;
 
         switch (langage.toLowerCase()) {
             case "java":
-                ext = ".java";
-                tempFile = new File(tempDir.toFile(), "Main" + ext);
-                Files.writeString(tempFile.toPath(), codeFinal);
-                compileCommand = "javac " + tempFile.getAbsolutePath();
-                runCommand = "java -cp " + tempDir + " Main";
+                fileName = "Main.java";
+                compileCommand = List.of("javac", "-J-XX:+UseSerialGC", fileName);
+                runCommand = List.of("java", "-XX:+UseSerialGC", "-cp", ".", "Main");
                 break;
 
             case "python":
-                ext = ".py";
-                tempFile = new File(tempDir.toFile(), "script" + ext);
-                Files.writeString(tempFile.toPath(), codeFinal);
-                String os = System.getProperty("os.name").toLowerCase();
-                runCommand = os.contains("win") ? "python " + tempFile.getAbsolutePath()
-                        : "python3 " + tempFile.getAbsolutePath();
+                fileName = "script.py";
+                boolean windowsHost = System.getProperty("os.name").toLowerCase().contains("win");
+                String python = sandbox.getMode() == Sandbox.Mode.NONE && windowsHost ? "python" : "python3";
+                runCommand = List.of(python, fileName);
                 break;
 
             case "c":
-                ext = ".c";
-                tempFile = new File(tempDir.toFile(), "program" + ext);
-                Files.writeString(tempFile.toPath(), codeFinal);
-                outputExe = new File(tempDir.toFile(), "program.exe");
-                compileCommand = "gcc " + tempFile.getAbsolutePath() + " -o " + outputExe.getAbsolutePath();
-                runCommand = outputExe.getAbsolutePath();
+                fileName = "program.c";
+                compileCommand = List.of("gcc", fileName, "-o", "program.exe");
+                runCommand = List.of("./program.exe");
                 break;
 
             case "javascript":
-                ext = ".js";
-                tempFile = new File(tempDir.toFile(), "script" + ext);
-                Files.writeString(tempFile.toPath(), codeFinal);
-                runCommand = "node " + tempFile.getAbsolutePath();
+                fileName = "script.js";
+                runCommand = List.of("node", fileName);
                 break;
 
             case "php":
-                ext = ".php";
-                tempFile = new File(tempDir.toFile(), "script" + ext);
-                Files.writeString(tempFile.toPath(), codeFinal);
-                runCommand = "php " + tempFile.getAbsolutePath();
+                fileName = "script.php";
+                runCommand = List.of("php", fileName);
                 break;
 
             default:
                 throw new IllegalArgumentException("Unsupported language: " + langage);
         }
 
-        // Compile if required
-        if (compileCommand != null) {
-            Process processCompile = Runtime.getRuntime().exec(compileCommand);
-            int exitCode = processCompile.waitFor();
-            if (exitCode != 0) {
-                BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(processCompile.getErrorStream()));
-                StringBuilder errorOutput = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null)
-                    errorOutput.append(line).append("\n");
-                return new ResultatExecution("", errorOutput.toString(), exitCode);
-            }
-        }
-
-        // Run the compiled or interpreted program
-        Process process = Runtime.getRuntime().exec(runCommand);
-        process.waitFor();
-
-        BufferedReader stdReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        StringBuilder stdOutput = new StringBuilder();
-        String line;
-        while ((line = stdReader.readLine()) != null)
-            stdOutput.append(line).append("\n");
-
-        BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
-        StringBuilder errOutput = new StringBuilder();
-        while ((line = errReader.readLine()) != null)
-            errOutput.append(line).append("\n");
-
-        // Cleanup temporary directory
+        Path tempDir = Files.createTempDirectory("fusion_");
         try {
-            if (tempDir.toFile().exists()) {
-                deleteDirectory(tempDir.toFile());
-            }
-        } catch (Exception e) {
-            System.err.println("Cleanup error: " + e.getMessage());
-        }
+            Files.writeString(tempDir.resolve(fileName), codeFinal);
 
-        return new ResultatExecution(stdOutput.toString(), errOutput.toString(), process.exitValue());
+            // Compile if required (the compiler may write to the submission directory)
+            if (compileCommand != null) {
+                Sandbox.Result compilation = sandbox.run(tempDir, compileCommand, true);
+                if (compilation.exitCode() != 0) {
+                    return new ResultatExecution("", compilation.stderr(), compilation.exitCode());
+                }
+            }
+
+            // Run the compiled or interpreted program (read-only submission directory)
+            Sandbox.Result execution = sandbox.run(tempDir, runCommand, false);
+            return new ResultatExecution(execution.stdout(), execution.stderr(), execution.exitCode());
+        } finally {
+            try {
+                deleteDirectory(tempDir.toFile());
+            } catch (IOException e) {
+                System.err.println("Cleanup error: " + e.getMessage());
+            }
+        }
     }
 
     // ========================
