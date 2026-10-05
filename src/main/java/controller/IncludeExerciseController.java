@@ -131,6 +131,10 @@ public class IncludeExerciseController {
                 resultat = fusionneur.executerCode(lang.getName(), code, exercise.getBaseCode(), exercise.getLineCode());
             }
 
+            if (resultat.isTempsDepasse()) {
+                return resultat.getSortieErreur();
+            }
+
             if (resultat.getCodeRetour() == 0) {
                 String output = resultat.getSortieStandard().trim();
                 String expectedOutput = generateExpectedOutput(lang, exercise);

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -154,5 +155,29 @@ class SandboxIntegrationTest {
         assertEquals(0, r.getCodeRetour(), r.getSortieErreur());
         assertTrue(r.getSortieStandard().endsWith("[output truncated]\n"));
         assertTrue(r.getSortieStandard().length() < 70_000);
+    }
+
+    // --- wall-clock time limit -----------------------------------------------------------
+
+    @Test
+    void aBlockedSubmissionIsStoppedAndItsContainerRemoved() throws Exception {
+        // Sleeping uses no CPU time: only the wall-clock limit can stop it
+        Sandbox quick = new Sandbox(Sandbox.Mode.DOCKER, Sandbox.DEFAULT_IMAGE,
+                Sandbox.Limits.defaults().withTimeouts(30, 3));
+        long start = System.nanoTime();
+
+        var r = new FusionneurCode3(quick).executerCode("python", "def f():\n    import time\n    time.sleep(120)\n", "", -1);
+
+        assertTrue(r.isTempsDepasse(), r.getSortieErreur());
+        assertTrue(r.getSortieErreur().startsWith("Time limit exceeded"), r.getSortieErreur());
+        assertTrue(System.nanoTime() - start < TimeUnit.SECONDS.toNanos(30));
+        assertEquals("", runningSandboxContainers(), "the timed-out container must be killed");
+    }
+
+    private static String runningSandboxContainers() throws Exception {
+        Process ps = new ProcessBuilder(List.of("docker", "ps", "-q", "--filter", "name=codyngame-")).start();
+        String ids = new String(ps.getInputStream().readAllBytes()).trim();
+        ps.waitFor();
+        return ids;
     }
 }

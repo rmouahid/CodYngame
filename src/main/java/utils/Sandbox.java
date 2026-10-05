@@ -6,9 +6,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Runs the compilation and execution of user-submitted code in an isolated,
@@ -24,6 +27,11 @@ import java.util.Locale;
  *     <li>limits on memory (no swap), CPU, number of processes, CPU time, file size
  *     and open files</li>
  * </ul>
+ *
+ * <p>In every mode, a command that exceeds its wall-clock time limit (see
+ * {@link Limits}) is stopped, with its child processes and its container, and its
+ * {@link Result} is flagged {@link Result#timedOut()}: a submission that loops or
+ * blocks forever cannot hold the application.</p>
  *
  * <p>If Docker or the sandbox image is not available, execution is refused
  * (fail closed) with a {@link SandboxUnavailableException}. Running submissions
@@ -68,24 +76,51 @@ public class Sandbox {
      * @param maxOpenFiles    maximum number of open file descriptors
      * @param tmpSizeMb       size of the writable {@code /tmp} tmpfs (MB)
      * @param maxOutputBytes  bytes of stdout/stderr kept; the rest is discarded
+     * @param compileTimeoutSeconds wall-clock time allowed to compile a submission
+     * @param runTimeoutSeconds     wall-clock time allowed to run it; unlike the CPU time
+     *                              limit, it also stops a program that sleeps or blocks
      */
     public record Limits(int memoryMb, double cpus, int maxProcesses, int cpuTimeSeconds,
-                         int maxFileSizeMb, int maxOpenFiles, int tmpSizeMb, int maxOutputBytes) {
+                         int maxFileSizeMb, int maxOpenFiles, int tmpSizeMb, int maxOutputBytes,
+                         int compileTimeoutSeconds, int runTimeoutSeconds) {
 
-        /** Limits suited to small exercise functions, including the JVM and javac. */
+        /**
+         * Limits suited to small exercise functions, including the JVM and javac
+         * (a cold javac in a container takes a few seconds, hence 30 s to compile).
+         */
         public static Limits defaults() {
-            return new Limits(512, 1.0, 128, 10, 10, 256, 64, 64 * 1024);
+            return new Limits(512, 1.0, 128, 10, 10, 256, 64, 64 * 1024, 30, 10);
         }
+
+        /** Same limits with other wall-clock time limits. */
+        public Limits withTimeouts(int compileTimeoutSeconds, int runTimeoutSeconds) {
+            return new Limits(memoryMb, cpus, maxProcesses, cpuTimeSeconds, maxFileSizeMb, maxOpenFiles,
+                    tmpSizeMb, maxOutputBytes, compileTimeoutSeconds, runTimeoutSeconds);
+        }
+
+        public Duration compileTimeout() { return Duration.ofSeconds(compileTimeoutSeconds); }
+
+        public Duration runTimeout() { return Duration.ofSeconds(runTimeoutSeconds); }
     }
+
+    /** Exit code reported for a command stopped at its time limit (as GNU {@code timeout}). */
+    public static final int TIMEOUT_EXIT_CODE = 124;
 
     /**
      * Result of a sandboxed command.
      *
      * @param stdout   standard output, truncated to {@link Limits#maxOutputBytes()}
      * @param stderr   standard error, truncated to {@link Limits#maxOutputBytes()}
-     * @param exitCode exit code of the command
+     * @param exitCode exit code of the command, {@link #TIMEOUT_EXIT_CODE} if it timed out
+     * @param timedOut whether the command was stopped at its time limit; the output is
+     *                 then what it had written so far
      */
-    public record Result(String stdout, String stderr, int exitCode) { }
+    public record Result(String stdout, String stderr, int exitCode, boolean timedOut) {
+
+        public Result(String stdout, String stderr, int exitCode) {
+            this(stdout, stderr, exitCode, false);
+        }
+    }
 
     /** Thrown when the sandbox cannot be used, so the submission is not executed. */
     public static class SandboxUnavailableException extends IOException {
@@ -141,7 +176,8 @@ public class Sandbox {
         if (mode == Mode.NONE) return;
         Result result;
         try {
-            result = execute(List.of("docker", "image", "inspect", "--format", "{{.Id}}", image), null);
+            result = execute(List.of("docker", "image", "inspect", "--format", "{{.Id}}", image), null,
+                    DOCKER_COMMAND_TIMEOUT, null);
         } catch (IOException e) {
             throw new SandboxUnavailableException("Docker is required to run submissions safely but could not be "
                     + "started (" + e.getMessage() + "). Install Docker, or set CODYNGAME_SANDBOX=none for trusted "
@@ -154,6 +190,18 @@ public class Sandbox {
     }
 
     /**
+     * Runs {@code command} on the files of {@code workDir}, within the time limit of
+     * its step: {@link Limits#compileTimeout()} when {@code writable} (compilation),
+     * {@link Limits#runTimeout()} otherwise.
+     *
+     * @see #run(Path, List, boolean, Duration)
+     */
+    public Result run(Path workDir, List<String> command, boolean writable)
+            throws IOException, InterruptedException {
+        return run(workDir, command, writable, writable ? limits.compileTimeout() : limits.runTimeout());
+    }
+
+    /**
      * Runs {@code command} on the files of {@code workDir}.
      *
      * @param workDir  directory holding the submission; it is the working directory of the command
@@ -161,21 +209,33 @@ public class Sandbox {
      *                 (an executable produced in {@code workDir} is written {@code ./name})
      * @param writable whether the command may write to {@code workDir} (true for compilation,
      *                 false to run the submission)
+     * @param timeout  wall-clock time after which the command is stopped and its result
+     *                 flagged {@link Result#timedOut()}
      */
-    public Result run(Path workDir, List<String> command, boolean writable)
+    public Result run(Path workDir, List<String> command, boolean writable, Duration timeout)
             throws IOException, InterruptedException {
         if (mode == Mode.NONE) {
             System.err.println("WARNING: running user-submitted code WITHOUT sandbox (CODYNGAME_SANDBOX=none)");
-            return execute(hostCommand(workDir, command), workDir);
+            return execute(hostCommand(workDir, command), workDir, timeout, null);
         }
         checkAvailable();
-        return execute(dockerCommand(workDir, command, writable, containerUser(workDir, writable)), workDir);
+        String container = "codyngame-" + UUID.randomUUID();
+        return execute(dockerCommand(workDir, command, writable, containerUser(workDir, writable), container),
+                workDir, timeout, container);
     }
 
     /**
      * Wraps {@code command} into the {@code docker run} invocation that isolates it.
      */
     List<String> dockerCommand(Path workDir, List<String> command, boolean writable, String user) {
+        return dockerCommand(workDir, command, writable, user, null);
+    }
+
+    /**
+     * Same, naming the container {@code name} (when not null) so that it can be
+     * killed if the command times out.
+     */
+    List<String> dockerCommand(Path workDir, List<String> command, boolean writable, String user, String name) {
         List<String> args = new ArrayList<>(List.of(
                 "docker", "run", "--rm", "--interactive=false",
                 "--network", "none",
@@ -193,8 +253,9 @@ public class Sandbox {
                 "--tmpfs", "/tmp:rw,nosuid,nodev,size=" + limits.tmpSizeMb() + "m",
                 "--env", "HOME=/tmp",
                 "--volume", workDir.toAbsolutePath() + ":" + CONTAINER_WORKDIR + (writable ? ":rw" : ":ro"),
-                "--workdir", CONTAINER_WORKDIR,
-                image));
+                "--workdir", CONTAINER_WORKDIR));
+        if (name != null) args.addAll(List.of("--name", name));
+        args.add(image);
         args.addAll(command);
         return args;
     }
@@ -241,12 +302,23 @@ public class Sandbox {
         return NOBODY;
     }
 
+    /** Time limit of the Docker client commands the sandbox issues itself (inspect, kill). */
+    private static final Duration DOCKER_COMMAND_TIMEOUT = Duration.ofSeconds(30);
+
+    /** How long to wait, once a command is stopped, for its output to be fully read. */
+    private static final long DRAIN_MILLIS = 2_000;
+
     /**
      * Starts {@code command} and captures its output. Both streams are drained while
      * the process runs (a full pipe would otherwise block it), keeping at most
      * {@link Limits#maxOutputBytes()} bytes of each.
+     *
+     * <p>If it is still running after {@code timeout}, the process and its descendants
+     * are killed, as well as the Docker container {@code container} when not null:
+     * killing the {@code docker run} client alone would leave the container running.</p>
      */
-    private Result execute(List<String> command, Path directory) throws IOException, InterruptedException {
+    private Result execute(List<String> command, Path directory, Duration timeout, String container)
+            throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command);
         if (directory != null) builder.directory(directory.toFile());
         Process process = builder.start();
@@ -256,10 +328,31 @@ public class Sandbox {
         OutputCollector stderr = new OutputCollector(process.getErrorStream(), limits.maxOutputBytes());
         stdout.start();
         stderr.start();
-        int exitCode = process.waitFor();
-        stdout.join();
-        stderr.join();
-        return new Result(stdout.text(), stderr.text(), exitCode);
+
+        boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        if (!finished) {
+            if (container != null) killContainer(container);
+            // Descendants first: once the parent is gone they can no longer be found
+            process.descendants().forEach(ProcessHandle::destroyForcibly);
+            process.destroyForcibly();
+            process.waitFor();
+        }
+        // A surviving grandchild could keep a pipe open: don't wait for it forever
+        stdout.join(DRAIN_MILLIS);
+        stderr.join(DRAIN_MILLIS);
+        if (!finished) return new Result(stdout.text(), stderr.text(), TIMEOUT_EXIT_CODE, true);
+        return new Result(stdout.text(), stderr.text(), process.exitValue());
+    }
+
+    /** Kills a sandbox container whose command timed out ({@code --rm} then removes it). */
+    private void killContainer(String container) throws InterruptedException {
+        try {
+            Process kill = new ProcessBuilder("docker", "kill", container).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            if (!kill.waitFor(DOCKER_COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) kill.destroyForcibly();
+        } catch (IOException e) {
+            System.err.println("Could not kill sandbox container " + container + ": " + e.getMessage());
+        }
     }
 
     /** Reads a stream to its end on a background thread, keeping only its first bytes. */

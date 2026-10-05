@@ -29,22 +29,34 @@ public class FusionneurCode3 {
 
     /**
      * Class to hold the result of the code execution, including standard output,
-     * standard error, and the process exit code.
+     * standard error, the process exit code, and whether a time limit was exceeded.
      */
     public static class ResultatExecution {
         private String sortieStandard;
         private String sortieErreur;
         private int codeRetour;
+        private boolean tempsDepasse;
 
         public ResultatExecution(String out, String err, int code) {
+            this(out, err, code, false);
+        }
+
+        public ResultatExecution(String out, String err, int code, boolean tempsDepasse) {
             this.sortieStandard = out;
             this.sortieErreur = err;
             this.codeRetour = code;
+            this.tempsDepasse = tempsDepasse;
         }
 
         public String getSortieStandard() { return sortieStandard; }
         public String getSortieErreur() { return sortieErreur; }
         public int getCodeRetour() { return codeRetour; }
+
+        /**
+         * True if compilation or execution was stopped at its time limit (infinite
+         * loop, blocking call...); {@link #getSortieErreur()} then explains it.
+         */
+        public boolean isTempsDepasse() { return tempsDepasse; }
     }
 
     /**
@@ -249,15 +261,24 @@ public class FusionneurCode3 {
             Files.writeString(tempDir.resolve(fileName), codeFinal);
 
             // Compile if required (the compiler may write to the submission directory)
+            Sandbox.Limits limits = sandbox.getLimits();
             if (compileCommand != null) {
-                Sandbox.Result compilation = sandbox.run(tempDir, compileCommand, true);
+                Sandbox.Result compilation = sandbox.run(tempDir, compileCommand, true, limits.compileTimeout());
+                if (compilation.timedOut()) {
+                    return tempsDepasse("", "compilation took more than " + limits.compileTimeoutSeconds()
+                            + " s and was stopped.");
+                }
                 if (compilation.exitCode() != 0) {
                     return new ResultatExecution("", compilation.stderr(), compilation.exitCode());
                 }
             }
 
             // Run the compiled or interpreted program (read-only submission directory)
-            Sandbox.Result execution = sandbox.run(tempDir, runCommand, false);
+            Sandbox.Result execution = sandbox.run(tempDir, runCommand, false, limits.runTimeout());
+            if (execution.timedOut()) {
+                return tempsDepasse(execution.stdout(), "your code ran for more than " + limits.runTimeoutSeconds()
+                        + " s and was stopped. Check for an infinite loop or a call that never returns.");
+            }
             return new ResultatExecution(execution.stdout(), execution.stderr(), execution.exitCode());
         } finally {
             try {
@@ -271,6 +292,11 @@ public class FusionneurCode3 {
     // ========================
     //        UTILITIES
     // ========================
+
+    /** Result of a submission stopped at a time limit, with what it printed so far. */
+    private static ResultatExecution tempsDepasse(String sortieStandard, String raison) {
+        return new ResultatExecution(sortieStandard, "Time limit exceeded: " + raison, Sandbox.TIMEOUT_EXIT_CODE, true);
+    }
 
     /** Extracts function name from Python code */
     private String extraireNomFonctionPython(String code) {
