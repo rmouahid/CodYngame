@@ -6,13 +6,10 @@ import java.sql.SQLException;
 
 /**
  * Provides a static database connection utility.
- * Manages connection to the MySQL database used by the application.
+ * Manages connection to the MySQL database used by the application; the
+ * credentials come from {@link DatabaseConfig}, never from the source code.
  */
 public class DatabaseConnection {
-
-    private static final String URL = "jdbc:mysql://localhost:3306/codingame";
-    private static final String USER = "root";
-    private static final String PASSWORD = "maikimaik";
 
     private static Connection connection;
 
@@ -31,7 +28,8 @@ public class DatabaseConnection {
                 Class.forName("com.mysql.cj.jdbc.Driver");
 
                 // Establish connection to the database
-                connection = DriverManager.getConnection(URL, USER, PASSWORD);
+                DatabaseConfig config = DatabaseConfig.fromEnvironment();
+                connection = DriverManager.getConnection(config.url(), config.user(), config.password());
             } catch (ClassNotFoundException e) {
                 // Rethrow as SQLException for uniform exception handling
                 e.printStackTrace();
