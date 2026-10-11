@@ -1,0 +1,12 @@
+# MySQL connection settings for CodYngame.
+#
+# Copy this file to config.properties (git-ignored) and fill in your values:
+#   cp config.properties.example config.properties
+#
+# Each value can also be set with an environment variable (CODYNGAME_DB_URL,
+# CODYNGAME_DB_USER, CODYNGAME_DB_PASSWORD) or a JVM system property
+# (-Dcodyngame.db.password=...), which take precedence over this file.
+
+db.url=jdbc:mysql://localhost:3306/codingame
+db.user=root
+db.password=change-me

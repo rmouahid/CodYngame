@@ -1,1 +1,4 @@
 /target/
+
+# Local database credentials (see config.properties.example)
+config.properties
