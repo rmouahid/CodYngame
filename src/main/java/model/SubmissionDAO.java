@@ -113,8 +113,8 @@ public class SubmissionDAO {
             SELECT
               e.title AS exercise_title,
               COUNT(s.id) AS total_count,
-              SUM(CASE WHEN LOWER(TRIM(s.result)) = 'Correct function!' THEN 1 ELSE 0 END) AS success_count,
-              MIN(CASE WHEN LOWER(TRIM(s.result)) = 'Correct function!' THEN rn ELSE NULL END) AS first_success_attempt
+              SUM(CASE WHEN LOWER(TRIM(s.result)) = 'correct function!' THEN 1 ELSE 0 END) AS success_count,
+              MIN(CASE WHEN LOWER(TRIM(s.result)) = 'correct function!' THEN rn ELSE NULL END) AS first_success_attempt
             FROM (
               SELECT
                 id,
@@ -162,7 +162,7 @@ public class SubmissionDAO {
         String sql = """
             SELECT COUNT(*) * 1 AS score
             FROM Submission
-            WHERE user_id = ? AND LOWER(TRIM(result)) = 'Correct function!'
+            WHERE user_id = ? AND LOWER(TRIM(result)) = 'correct function!'
         """;
 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
