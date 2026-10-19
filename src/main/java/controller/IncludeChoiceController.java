@@ -39,7 +39,7 @@ public class IncludeChoiceController {
     @FXML
     private void handleBack() {
         try {
-            FXMLLoader loader = new FXMLLoader(getClass().getResource("/ui/Dashboard.fxml"));
+            FXMLLoader loader = new FXMLLoader(getClass().getResource("/ui/dashboard.fxml"));
             Parent root = loader.load();
 
             Stage stage = (Stage) backButton.getScene().getWindow();
