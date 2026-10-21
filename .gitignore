@@ -2,3 +2,6 @@
 
 # Local database credentials (see config.properties.example)
 config.properties
+
+# Stray archives uploaded by mistake
+*.zip
