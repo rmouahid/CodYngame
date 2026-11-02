@@ -74,3 +74,18 @@ CREATE TABLE MakeExercise (
     FOREIGN KEY (user_id) REFERENCES User(id),
     FOREIGN KEY (exercise_id) REFERENCES Exercise(id)
 );
+
+-- Test cases of each exercise, per language. For "include" exercises in
+-- Python, Java and C, test_code is appended to the user's function; the
+-- program output must equal expected_output (case and surrounding whitespace
+-- ignored). Several rows for the same exercise and language run in id order.
+-- Example data: test_cases_example.sql
+CREATE TABLE TestCase (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    exercise_id INT NOT NULL,
+    language_id INT NOT NULL,
+    test_code TEXT NOT NULL,
+    expected_output TEXT NOT NULL,
+    FOREIGN KEY (exercise_id) REFERENCES Exercise(id),
+    FOREIGN KEY (language_id) REFERENCES Language(id)
+);
