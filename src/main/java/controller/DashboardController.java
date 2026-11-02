@@ -60,14 +60,4 @@ public class DashboardController {
             System.out.println("Error while loading include-choice.fxml page.");
         }
     }
-
-    /**
-     * Handles the "STDIN/STDOUT" button click.
-     * Placeholder for future redirection to the corresponding exercise page.
-     */
-    @FXML
-    private void handleStdinClick() {
-        System.out.println("STDIN/STDOUT exercise selected.");
-        // TODO: redirect to the STDIN/STDOUT exercise page
-    }
 }
