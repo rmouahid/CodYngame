@@ -76,8 +76,6 @@ public class LoginController {
     private void handleAction() {
         String username = usernameField.getText().trim();
         String password = passwordField.getText();
-        String hash = PasswordUtils.hashPassword(password);
-
         if (isSignupMode) {
             String email = emailField.getText().trim();
 
@@ -91,7 +89,7 @@ public class LoginController {
                 return;
             }
 
-            User newUser = new User(username, email, hash);
+            User newUser = new User(username, email, PasswordUtils.hashPassword(password));
             if (dao.addUser(newUser)) {
                 errorLabel.setText("Account created successfully!");
                 toggleMode();  // Switch back to login mode
@@ -101,7 +99,7 @@ public class LoginController {
 
         } else {
             // Login mode
-            if (dao.checkLogin(username, hash)) {
+            if (dao.checkLogin(username, password)) {
                 User user = dao.getUserByUsername(username);
                 Session.getInstance().setCurrentUser(user);
                 loadHome();

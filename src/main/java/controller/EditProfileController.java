@@ -79,8 +79,7 @@ public class EditProfileController {
         String newPwd      = newPasswordField.getText();
 
         // Verify current password
-        String hashedInput = PasswordUtils.hashPassword(currentPwd);
-        if (!hashedInput.equals(u.getPasswordHash())) {
+        if (!PasswordUtils.verify(currentPwd, u.getPasswordHash())) {
             showAlert("Error", "Incorrect current password.");
             return;
         }
@@ -88,7 +87,7 @@ public class EditProfileController {
         // At least one field must change
         boolean changeUsername = !newUsername.isEmpty() && !newUsername.equals(u.getUsername());
         boolean changeEmail    = !newEmail.isEmpty()    && !newEmail.equals(u.getEmail());
-        boolean changePwd      = !newPwd.isEmpty()      && !PasswordUtils.hashPassword(newPwd).equals(u.getPasswordHash());
+        boolean changePwd      = !newPwd.isEmpty()      && !PasswordUtils.verify(newPwd, u.getPasswordHash());
 
         if (!changeUsername && !changeEmail && !changePwd) {
             showAlert("Warning", "Please modify at least one field.");
