@@ -2,6 +2,8 @@ package model;
 
 import java.sql.*;
 
+import utils.PasswordUtils;
+
 /**
  * DAO for handling CRUD operations related to the {@link User} entity.
  */
@@ -34,28 +36,57 @@ public class UserDAO {
     }
 
     /**
-     * Verifies user credentials (username + hashed password).
+     * Verifies user credentials. A legacy unsalted hash is replaced by a salted
+     * PBKDF2 hash when the password matches.
      *
-     * @param username     the username entered
-     * @param passwordHash the hashed password entered
-     * @return true if a matching user exists, false otherwise
+     * @param username the username entered
+     * @param password the plaintext password entered
+     * @return true if the username exists and the password matches, false otherwise
      */
-    public boolean checkLogin(String username, String passwordHash) {
-        String sql = "SELECT COUNT(*) FROM User WHERE username = ? AND password_hash = ?";
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, username);
-            ps.setString(2, passwordHash);
-
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() && rs.getInt(1) == 1;
-            }
-
+    public boolean checkLogin(String username, String password) {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            return checkLogin(conn, username, password);
         } catch (SQLException e) {
             e.printStackTrace();
         }
         return false;
+    }
+
+    /**
+     * Same as {@link #checkLogin(String, String)} on a given connection.
+     *
+     * @param conn     the database connection
+     * @param username the username entered
+     * @param password the plaintext password entered
+     * @return true if the username exists and the password matches, false otherwise
+     * @throws SQLException if a query fails
+     */
+    boolean checkLogin(Connection conn, String username, String password) throws SQLException {
+        int id;
+        String stored;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT id, password_hash FROM User WHERE username = ?")) {
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return false;
+                }
+                id = rs.getInt("id");
+                stored = rs.getString("password_hash");
+            }
+        }
+        if (!PasswordUtils.verify(password, stored)) {
+            return false;
+        }
+        if (PasswordUtils.needsRehash(stored)) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE User SET password_hash = ? WHERE id = ?")) {
+                ps.setString(1, PasswordUtils.hashPassword(password));
+                ps.setInt(2, id);
+                ps.executeUpdate();
+            }
+        }
+        return true;
     }
 
     /**
