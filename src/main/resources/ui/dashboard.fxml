@@ -38,12 +38,12 @@
                         style="-fx-background-color: #00c9ff; -fx-text-fill: black; -fx-font-weight: bold;"
                         prefWidth="150" prefHeight="50"/>
 
-                <!-- STDIN/STDOUT mode -->
+                <!-- STDIN/STDOUT mode: not implemented yet, shown disabled -->
                 <Button
-                        text="STDIN/STDOUT"
-                        onAction="#handleStdinClick"
+                        text="STDIN/STDOUT (soon)"
+                        disable="true"
                         style="-fx-background-color: #92fe9d; -fx-text-fill: black; -fx-font-weight: bold;"
-                        prefWidth="150" prefHeight="50"/>
+                        prefWidth="190" prefHeight="50"/>
             </HBox>
         </VBox>
     </center>

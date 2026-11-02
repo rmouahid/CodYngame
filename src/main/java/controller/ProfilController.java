@@ -29,8 +29,6 @@ public class ProfilController {
     @FXML private Label scoreLabel;
     @FXML private Label createdAtLabel;
     @FXML private Button submissionsButton;
-    @FXML private Button successButton;
-    @FXML private Button failButton;
     @FXML private Label passwordLabel;
     @FXML private Button editButton;
 
@@ -106,23 +104,5 @@ public class ProfilController {
         } catch (IOException e) {
             e.printStackTrace();
         }
-    }
-
-    /**
-     * Handles the success filter button.
-     * (To be implemented: redirect to success submissions.)
-     */
-    @FXML
-    private void handleSuccess() {
-        System.out.println("Go to the successful submissions page...");
-    }
-
-    /**
-     * Handles the failure filter button.
-     * (To be implemented: redirect to failed submissions.)
-     */
-    @FXML
-    private void handleFails() {
-        System.out.println("Go to the failed submissions page...");
     }
 }
