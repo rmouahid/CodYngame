@@ -13,10 +13,13 @@ import model.User;
 import model.UserDAO;
 import model.Submission;
 import model.SubmissionDAO;
+import model.TestCase;
+import model.TestCaseDAO;
 import model.DatabaseConnection;
 import utils.Session;
 
 import java.sql.SQLException;
+import java.util.List;
 
 /**
  * Controller for solving INCLUDE-type exercises.
@@ -109,7 +112,7 @@ public class IncludeExerciseController {
     }
 
     /**
-     * Executes the user's code with predefined test cases and returns the output or error.
+     * Executes the user's code with the exercise's test cases from the database and returns the output or error.
      *
      * @param code     The user's code.
      * @param lang     The selected programming language.
@@ -121,8 +124,15 @@ public class IncludeExerciseController {
             FusionneurCode3 fusionneur = new FusionneurCode3();
             String langName = lang.getName().toLowerCase();
 
+            List<TestCase> testCases = new TestCaseDAO(DatabaseConnection.getConnection())
+                    .findByExerciseAndLanguage(exercise.getId(), lang.getId());
+            if (testCases.isEmpty()) {
+                return "No test case is defined for this exercise in " + lang.getName() + ".\n"
+                        + "Add rows to the TestCase table (see test_cases_example.sql).";
+            }
+
             FusionneurCode3.ResultatExecution resultat;
-            String tests = generateAutomaticTests(lang, exercise);
+            String tests = TestCase.joinTestCode(testCases);
             String codeToExecute = code + "\n" + tests;
 
             if (langName.equals("python") || langName.equals("c") || langName.equals("java")) {
@@ -137,9 +147,9 @@ public class IncludeExerciseController {
 
             if (resultat.getCodeRetour() == 0) {
                 String output = resultat.getSortieStandard().trim();
-                String expectedOutput = generateExpectedOutput(lang, exercise);
+                String expectedOutput = TestCase.joinExpectedOutput(testCases);
 
-                if (expectedOutput != null && outputsEqual(expectedOutput, output)) {
+                if (outputsEqual(expectedOutput, output)) {
                     int points = selectedExercise.getDifficulty();
                     User currentUser = Session.getInstance().getCurrentUser();
                     if (currentUser != null) {
@@ -171,60 +181,5 @@ public class IncludeExerciseController {
      */
     private boolean outputsEqual(String s1, String s2) {
         return s1.trim().equalsIgnoreCase(s2.trim());
-    }
-
-    /**
-     * Generates automatic test calls based on the selected exercise and language.
-     */
-    private String generateAutomaticTests(Language lang, Exercise exercise) {
-        int exoId = exercise.getId();
-        String langName = lang.getName().toLowerCase();
-
-        switch (langName) {
-            case "python":
-                if (exoId == 1) return "print(add(2, 3))\nprint(add(1, 2))";
-                if (exoId == 2) return "print(is_even(2))\nprint(is_even(3))";
-                break;
-            case "java":
-                if (exoId == 3) return "System.out.println(add(2, 3));\nSystem.out.println(add(1, 2));";
-                if (exoId == 4) return "System.out.println(isEven(2));\nSystem.out.println(isEven(3));";
-                break;
-            case "php":
-                if (exoId == 5) return "echo add(2, 3) . \"\\n\"; echo add(1, 2) . \"\\n\";";
-                if (exoId == 6) return "echo is_even(2) ? 'true' : 'false'; echo \"\\n\"; echo is_even(3) ? 'true' : 'false';";
-                break;
-            case "c":
-                if (exoId == 7 || exoId == 8) return ""; // To be implemented
-                break;
-            case "javascript":
-                if (exoId == 9) return "console.log(add(2, 3)); console.log(add(1, 2));";
-                if (exoId == 10) return "console.log(isEven(2)); console.log(isEven(3));";
-                break;
-        }
-        return "";
-    }
-
-    /**
-     * Returns the expected output for the selected exercise and language.
-     */
-    private String generateExpectedOutput(Language lang, Exercise exercise) {
-        int exoId = exercise.getId();
-        String langName = lang.getName().toLowerCase();
-
-        switch (langName) {
-            case "python":
-            case "java":
-            case "php":
-            case "c":
-            case "javascript":
-                if (exoId == 1 || exoId == 3 || exoId == 5 || exoId == 7 || exoId == 9) return "5\n3";
-                if (exoId == 2 || exoId == 4 || exoId == 6 || exoId == 8 || exoId == 10) {
-                    if (langName.equals("php") || langName.equals("c")) return "1\n0";
-                    if (langName.equals("python") || langName.equals("javascript")) return "True\nFalse";
-                    if (langName.equals("java")) return "true\nfalse";
-                }
-                break;
-        }
-        return null;
     }
 }
