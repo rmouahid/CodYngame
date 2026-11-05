@@ -106,3 +106,7 @@ src/main/resources/
 sandbox/                      Docker image used to run submissions
 doc/                          specification and project report
 ```
+
+## License
+
+[MIT](LICENSE), © the CodYngame contributors.
