@@ -75,6 +75,18 @@ CREATE TABLE MakeExercise (
     FOREIGN KEY (exercise_id) REFERENCES Exercise(id)
 );
 
+-- Exercises already credited to a user: the primary key guarantees that the
+-- points of an exercise are added to the score only once per user.
+-- Existing databases: run this CREATE TABLE statement to migrate.
+CREATE TABLE SolvedExercise (
+    user_id INT NOT NULL,
+    exercise_id INT NOT NULL,
+    solved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, exercise_id),
+    FOREIGN KEY (user_id) REFERENCES User(id),
+    FOREIGN KEY (exercise_id) REFERENCES Exercise(id)
+);
+
 -- Test cases of each exercise, per language. For "include" exercises in
 -- Python, Java and C, test_code is appended to the user's function; the
 -- program output must equal expected_output (case and surrounding whitespace
