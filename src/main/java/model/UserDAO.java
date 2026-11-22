@@ -129,6 +129,67 @@ public class UserDAO {
     }
 
     /**
+     * Credits the points of an exercise the first time a user solves it. Later
+     * successes on the same exercise do not change the score.
+     *
+     * @param userId     the user ID
+     * @param exerciseId the solved exercise ID
+     * @param points     number of points to add on the first success
+     * @return true if the points were credited, false if already credited before
+     * @throws SQLException if a database error occurs
+     */
+    public boolean awardFirstSolve(int userId, int exerciseId, int points) throws SQLException {
+        try (Connection conn = DatabaseConnection.getConnection()) {
+            return awardFirstSolve(conn, userId, exerciseId, points);
+        }
+    }
+
+    /**
+     * Same as {@link #awardFirstSolve(int, int, int)} on a given connection. The
+     * unique key of SolvedExercise and the score update are committed together,
+     * so two simultaneous successes cannot both credit the points.
+     *
+     * @param conn       the database connection
+     * @param userId     the user ID
+     * @param exerciseId the solved exercise ID
+     * @param points     number of points to add on the first success
+     * @return true if the points were credited, false if already credited before
+     * @throws SQLException if a database error occurs
+     */
+    boolean awardFirstSolve(Connection conn, int userId, int exerciseId, int points) throws SQLException {
+        boolean previousAutoCommit = conn.getAutoCommit();
+        conn.setAutoCommit(false);
+        try {
+            try (PreparedStatement stmt = conn.prepareStatement(
+                    "INSERT INTO SolvedExercise (user_id, exercise_id) VALUES (?, ?)")) {
+                stmt.setInt(1, userId);
+                stmt.setInt(2, exerciseId);
+                stmt.executeUpdate();
+            } catch (SQLException e) {
+                // SQLState class 23 = integrity constraint violation: already solved
+                if (e.getSQLState() != null && e.getSQLState().startsWith("23")) {
+                    conn.rollback();
+                    return false;
+                }
+                throw e;
+            }
+            try (PreparedStatement stmt = conn.prepareStatement(
+                    "UPDATE User SET score = score + ? WHERE id = ?")) {
+                stmt.setInt(1, points);
+                stmt.setInt(2, userId);
+                stmt.executeUpdate();
+            }
+            conn.commit();
+            return true;
+        } catch (SQLException e) {
+            conn.rollback();
+            throw e;
+        } finally {
+            conn.setAutoCommit(previousAutoCommit);
+        }
+    }
+
+    /**
      * Retrieves a User object based on the username.
      *
      * @param username the username to search

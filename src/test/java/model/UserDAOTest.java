@@ -35,7 +35,14 @@ class UserDAOTest {
                     id INT PRIMARY KEY AUTO_INCREMENT,
                     username VARCHAR(255) NOT NULL UNIQUE,
                     email TEXT,
-                    password_hash TEXT
+                    password_hash TEXT,
+                    score INT DEFAULT 0
+                )""");
+            stmt.execute("""
+                CREATE TABLE SolvedExercise (
+                    user_id INT NOT NULL,
+                    exercise_id INT NOT NULL,
+                    PRIMARY KEY (user_id, exercise_id)
                 )""");
         }
     }
@@ -83,6 +90,29 @@ class UserDAOTest {
 
         assertFalse(dao.checkLogin(conn, "alice", "wrong"));
         assertEquals(LEGACY_SECRET, storedHash("alice"));
+    }
+
+    @Test
+    void creditsAnExerciseOnlyOnce() throws SQLException {
+        insert("alice", "x");
+
+        assertTrue(dao.awardFirstSolve(conn, 1, 7, 3));
+        assertFalse(dao.awardFirstSolve(conn, 1, 7, 3));
+        assertFalse(dao.awardFirstSolve(conn, 1, 7, 3));
+        assertEquals(3, score(1));
+
+        assertTrue(dao.awardFirstSolve(conn, 1, 8, 2));
+        assertEquals(5, score(1));
+    }
+
+    private int score(int userId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT score FROM User WHERE id = ?")) {
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
     }
 
     private void insert(String username, String hash) throws SQLException {

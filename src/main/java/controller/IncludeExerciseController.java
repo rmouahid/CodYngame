@@ -177,7 +177,7 @@ public class IncludeExerciseController {
                     if (currentUser != null) {
                         UserDAO userDAO = new UserDAO();
                         try {
-                            userDAO.updateUserScore(currentUser.getId(), points);
+                            userDAO.awardFirstSolve(currentUser.getId(), selectedExercise.getId(), points);
                         } catch (SQLException e) {
                             System.err.println("Score update error: " + e.getMessage());
                         }
