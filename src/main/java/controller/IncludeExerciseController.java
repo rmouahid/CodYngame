@@ -2,6 +2,7 @@ package controller;
 
 import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
+import javafx.concurrent.Task;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
@@ -30,6 +31,7 @@ public class IncludeExerciseController {
 
     @FXML private TextArea baseCodeArea;
     @FXML private Button backButton;
+    @FXML private Button runButton;
     @FXML private Label exerciseTitle;
     @FXML private TextArea exerciseDescription;
     @FXML private TextArea codeEditor;
@@ -77,6 +79,7 @@ public class IncludeExerciseController {
     /**
      * Handles the Run button click, compiles and executes user code,
      * evaluates the output, updates the score if successful, and records the submission.
+     * The work runs on a background thread so the window stays responsive.
      */
     @FXML
     private void handleRun() {
@@ -86,29 +89,48 @@ public class IncludeExerciseController {
             return;
         }
 
-        try {
-            String result = executeUserCode(userCode, selectedLanguage, selectedExercise);
-            outputArea.setText(result);
+        Language language = selectedLanguage;
+        Exercise exercise = selectedExercise;
+        User currentUser = Session.getInstance().getCurrentUser();
 
-            User currentUser = Session.getInstance().getCurrentUser();
-            if (currentUser != null) {
-                Submission submission = new Submission();
-                submission.setUserId(currentUser.getId());
-                submission.setExerciseId(selectedExercise.getId());
-                submission.setLanguageId(selectedLanguage.getId());
-                submission.setCode(userCode);
-                submission.setResult(result);
-                submission.setSuccess(result.trim().equalsIgnoreCase("Correct function!"));
-                submission.setCreatedAt(java.time.LocalDateTime.now());
+        runButton.setDisable(true);
+        outputArea.setText("Running...");
 
-                SubmissionDAO dao = new SubmissionDAO(DatabaseConnection.getConnection());
-                dao.insertSubmission(submission);
+        Task<String> task = new Task<>() {
+            @Override
+            protected String call() throws Exception {
+                String result = executeUserCode(userCode, language, exercise);
+                if (currentUser != null) {
+                    Submission submission = new Submission();
+                    submission.setUserId(currentUser.getId());
+                    submission.setExerciseId(exercise.getId());
+                    submission.setLanguageId(language.getId());
+                    submission.setCode(userCode);
+                    submission.setResult(result);
+                    submission.setSuccess(result.trim().equalsIgnoreCase("Correct function!"));
+                    submission.setCreatedAt(java.time.LocalDateTime.now());
+
+                    SubmissionDAO dao = new SubmissionDAO(DatabaseConnection.getConnection());
+                    dao.insertSubmission(submission);
+                }
+                return result;
             }
+        };
+        // Both callbacks run on the JavaFX application thread.
+        task.setOnSucceeded(e -> {
+            outputArea.setText(task.getValue());
+            runButton.setDisable(false);
+        });
+        task.setOnFailed(e -> {
+            Throwable error = task.getException();
+            outputArea.setText("Execution error:\n" + error.getMessage());
+            error.printStackTrace();
+            runButton.setDisable(false);
+        });
 
-        } catch (Exception e) {
-            outputArea.setText("Execution error:\n" + e.getMessage());
-            e.printStackTrace();
-        }
+        Thread worker = new Thread(task, "submission-runner");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     /**

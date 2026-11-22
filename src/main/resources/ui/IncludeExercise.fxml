@@ -75,7 +75,7 @@
                       prefWidth="750"/>
 
             <!-- Run button to test the code -->
-            <Button text="RUN TEST" onAction="#handleRun"/>
+            <Button fx:id="runButton" text="RUN TEST" onAction="#handleRun"/>
         </VBox>
     </center>
 
